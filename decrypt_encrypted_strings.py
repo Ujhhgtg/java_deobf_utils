@@ -100,20 +100,17 @@ def decrypt(j2, string_array):
         col = int(idx % 8191)
         return ord(string_array[row][col])
 
-    try:
-        jCharAt = jAb3 ^ (get_char(i2) << 32)
-        length = int(l_ushr(jCharAt, 32) & 0xFFFF)
+    jCharAt = jAb3 ^ (get_char(i2) << 32)
+    length = int(l_ushr(jCharAt, 32) & 0xFFFF)
 
-        result = []
-        for i in range(length):
-            idx = i2 + i + 1
-            jCharAt = to_int64(ab(jCharAt) ^ (get_char(idx) << 32))
-            decrypted_char = int(l_ushr(jCharAt, 32) & 0xFFFF)
-            result.append(chr(decrypted_char))
+    result = []
+    for i in range(length):
+        idx = i2 + i + 1
+        jCharAt = to_int64(ab(jCharAt) ^ (get_char(idx) << 32))
+        decrypted_char = int(l_ushr(jCharAt, 32) & 0xFFFF)
+        result.append(chr(decrypted_char))
 
-        return "".join(result)
-    except Exception as e:
-        return f"[DECRYPT_ERROR: {e}]"
+    return "".join(result)
 
 
 # --- File Operations ---
@@ -213,6 +210,9 @@ def deobfuscate_file(java_path: Path, string_array, call_name: str):
     for match, long_val in all_matches:
         try:
             decrypted = decrypt(long_val, string_array)
+
+            # Verify the decrypted string can be encoded; skip if it can't (e.g. surrogates)
+            decrypted.encode("utf-8")
 
             # Escape special characters for Java string
             decrypted_escaped = (
