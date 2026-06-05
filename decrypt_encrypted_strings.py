@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import pyperclip
+import pyperclip  # ty:ignore[unresolved-import]
 
 # ============================================================
 # Precision Helpers (Java int/long semantics)
@@ -158,12 +158,14 @@ def decrypt_batch_api(longs, api_url, timeout=120):
             else {}
         )
     except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8") if e.code != 200 else ""
-        raise RuntimeError(f"Batch API error {e.code}: {body}")
+        body = e.read().decode("utf-8") if e.code != 200 else "(no body)"
+        print(f"  [WARN] Batch API error {e.code}: {body} — skipping chunk")
+        return {}
     except urllib.error.URLError as e:
-        raise RuntimeError(
-            f"Cannot reach API at {api_url}: {e.reason}. Is WASLDH running?"
+        print(
+            f"  [WARN] Cannot reach API at {api_url}: {e.reason}. Is WASLDH running? — skipping chunk"
         )
+        return {}
 
 
 def build_lookup_via_api(longs, api_url, batch_size=200):
@@ -210,7 +212,7 @@ def collect_all_longs(root_dir):
     longs = set()
     for fpath in sorted(Path(root_dir).rglob("*.java")):
         content = fpath.read_text(encoding="utf-8", errors="surrogateescape")
-        for m, long_val in find_crypt_calls(content):
+        for _, long_val in find_crypt_calls(content):
             longs.add(long_val)
     return sorted(longs)
 
