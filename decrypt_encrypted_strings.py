@@ -145,7 +145,8 @@ def _parse_batch_response(data):
 
 def decrypt_batch_api(longs, api_url, timeout=120):
     """Decrypt multiple longs via the batch endpoint.
-    Returns dict {long: string | None}."""
+    Returns dict {long: string | None}.
+    Falls back to individual requests on batch failure."""
     if not longs:
         return {}
     keys_str = ",".join(str(lv) for lv in longs)
@@ -157,15 +158,18 @@ def decrypt_batch_api(longs, api_url, timeout=120):
             if resp.status == 200
             else {}
         )
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8") if e.code != 200 else "(no body)"
-        print(f"  [WARN] Batch API error {e.code}: {body} — skipping chunk")
-        return {}
-    except urllib.error.URLError as e:
-        print(
-            f"  [WARN] Cannot reach API at {api_url}: {e.reason}. Is WASLDH running? — skipping chunk"
-        )
-        return {}
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        # Fall back to individual requests for each long in the chunk
+        result = {}
+        for lv in longs:
+            try:
+                val = decrypt_v2_api(lv, api_url)
+                result[lv] = val
+                print(f'    [OK] 0x{lv:016x} -> "{val}"')
+            except RuntimeError as e2:
+                print(f"    [WARN] 0x{lv:016x} -> {e2}")
+                result[lv] = None
+        return result
 
 
 def build_lookup_via_api(longs, api_url, batch_size=200):
