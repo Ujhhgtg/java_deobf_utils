@@ -190,18 +190,22 @@ def build_lookup_via_api(longs, api_url, batch_size=200):
     return lookup
 
 
-# File pattern for MagicFactory.get calls
-_MF_PATTERN = re.compile(
-    re.escape("MagicFactory.get")
-    + r"\((-?(?:0x[0-9a-fA-F]+|\d+))[Ll]?"
-    + r"(?:\s*,\s*(?:strArr\d*|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*))?\)"
+def _make_pattern(call_name):
+    """Build a regex matching `call_name(...)` with a numeric literal first arg."""
+    return re.compile(
+        re.escape(call_name)
+        + r"\((-?(?:0x[0-9a-fA-F]+|\d+))[Ll]?"
+        + r"(?:\s*,\s*(?:strArr\d*|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*))?\)"
 )
 
 
 def find_crypt_calls(java_content, call_name=None):
-    """Find all MagicFactory.get calls in Java content."""
+    """Find all calls matching the given call name in Java content."""
+    if call_name is None:
+        call_name = "MagicFactory.get"
     matches = []
-    for m in _MF_PATTERN.finditer(java_content):
+    pattern = _make_pattern(call_name)
+    for m in pattern.finditer(java_content):
         long_str = m.group(1)
         try:
             long_val = int(long_str, 0)
@@ -211,20 +215,19 @@ def find_crypt_calls(java_content, call_name=None):
     return matches
 
 
-def collect_all_longs(root_dir):
-    """Collect all unique long values from MagicFactory.get calls in all Java files."""
+def collect_all_longs(root_dir, call_name="MagicFactory.get"):
+    """Collect all unique long values from matching calls in all Java files."""
     longs = set()
     for fpath in sorted(Path(root_dir).rglob("*.java")):
         content = fpath.read_text(encoding="utf-8", errors="surrogateescape")
-        for _, long_val in find_crypt_calls(content):
+        for _, long_val in find_crypt_calls(content, call_name):
             longs.add(long_val)
     return sorted(longs)
 
-
-def deobfuscate_file(java_path, lookup):
-    """Replace MagicFactory.get calls in a file using a {long: string} lookup."""
+def deobfuscate_file(java_path, lookup, call_name="MagicFactory.get"):
+    """Replace matching calls in a file using a {long: string} lookup."""
     content = java_path.read_text(encoding="utf-8", errors="surrogateescape")
-    matches = find_crypt_calls(content)
+    matches = find_crypt_calls(content, call_name)
     if not matches:
         return 0, 0
 
@@ -343,7 +346,7 @@ def load_known_pairs(path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Deobfuscate WAuxiliary Java strings by reversing MagicFactory.get()."
+        description="Deobfuscate WAuxiliary Java strings by reversing encrypted string calls."
     )
     subparsers = parser.add_subparsers(dest="command", help="Mode of operation")
 
@@ -389,6 +392,7 @@ def main():
         help="Java file containing the String[] array (for v1 only)",
     )
     bp.add_argument("array_name", help="Name of the String[] field (for v1 only)")
+    bp.add_argument("call_name", help="Method call name to search for (e.g. MagicFactory.get)")
 
     # single — decrypt one value
     sp = subparsers.add_parser("single", help="Decrypt a single long value via API")
@@ -445,6 +449,7 @@ def main():
     pp.add_argument(
         "directory", type=Path, help="Root directory of .java files to scan"
     )
+    pp.add_argument("call_name", help="Method call name to search for (e.g. MagicFactory.get)")
 
     args = parser.parse_args()
     if not args.command:
@@ -453,8 +458,10 @@ def main():
 
     # ---- PREFLIGHT ----
     if args.command == "preflight":
-        print(f"Scanning {args.directory} for MagicFactory.get calls...")
-        longs = collect_all_longs(args.directory)
+        print(
+            f"Scanning {args.directory} for {args.call_name} calls..."
+        )
+        longs = collect_all_longs(args.directory, args.call_name)
         print(
             f"Found {len(longs)} unique long values. Decrypting via {args.api_url}..."
         )
@@ -548,10 +555,10 @@ def main():
             total_reps = 0
             for f in java_files:
                 content = f.read_text(encoding="utf-8", errors="surrogateescape")
-                matches = find_crypt_calls(content)
+                matches = find_crypt_calls(content, args.call_name)
                 if not matches:
                     continue
-                rep, _ = deobfuscate_file(f, {})  # won't match anything
+                rep, _ = deobfuscate_file(f, {}, args.call_name)  # won't match anything
                 # Actually do v1 decryption
                 matches.sort(key=lambda x: x[0].start(), reverse=True)
                 replaced = 0
@@ -584,8 +591,8 @@ def main():
                 lookup = load_lookup_file(args.lookup)
                 print(f"Loaded {len(lookup)} entries from {args.lookup}")
             else:
-                longs = collect_all_longs(args.directory)
-                print(f"Found {len(longs)} unique MagicFactory.get calls.")
+                longs = collect_all_longs(args.directory, args.call_name)
+                print(f"Found {len(longs)} unique {args.call_name} calls.")
                 print(f"Decrypting via {args.api_url}...")
                 lookup = build_lookup_via_api(longs, args.api_url, args.batch_size)
                 print(f"\nDecrypted {len(lookup)}/{len(longs)} values.")
@@ -612,7 +619,7 @@ def main():
             total_reps = 0
             total_missed = 0
             for f in java_files:
-                rep, miss = deobfuscate_file(f, lookup)
+                rep, miss = deobfuscate_file(f, lookup, args.call_name)
                 if rep:
                     print(
                         f"  {f.name}: {rep} replaced"
